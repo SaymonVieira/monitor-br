@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monitor BR - Produtos Irregulares em Tempo Real</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<style>
+  :root {
+    --bg: #080c10;
+    --surface: #0d1117;
+    --panel: #111820;
+    --border: #1e2d3d;
+    --accent: #ff3c3c;
+    --accent2: #ff8c00;
+    --accent3: #00e5ff;
+    --success: #00ff88;
+    --text: #c9d1d9;
+    --muted: #4a5568;
+    --font-mono: 'Space Mono', monospace;
+    --font-display: 'Syne', sans-serif;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:var(--bg); color:var(--text); font-family:var(--font-mono);
+    min-height:100vh; overflow-x:hidden;
+  }
+  body::before {
+    content:''; position:fixed; inset:0;
+    background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,229,255,0.015) 2px,rgba(0,229,255,0.015) 4px);
+    pointer-events:none; z-index:9999;
+  }
+  /* HEADER */
+  header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 28px; border-bottom:1px solid var(--border);
+    background:var(--surface); position:sticky; top:0; z-index:100;
+  }
+  .header-left { display:flex; align-items:center; gap:14px; }
+  .logo-dot {
+    width:10px; height:10px; border-radius:50%; background:var(--accent);
+    box-shadow:0 0 12px var(--accent); animation:pulse-dot 1.4s infinite;
+  }
+  @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.7)} }
+  .logo-text { font-family:var(--font-display); font-weight:800; font-size:18px; letter-spacing:-0.5px; color:#fff; }
+  .logo-text span { color:var(--accent); }
+  .header-status { display:flex; align-items:center; gap:22px; font-size:11px; color:var(--muted); letter-spacing:0.05em; }
+  .live-badge { background:var(--accent); color:#fff; font-size:10px; font-weight:700; padding:3px 8px; letter-spacing:0.15em; text-transform:uppercase; animation:blink-badge 2s infinite; }
+  @keyframes blink-badge { 0%,90%,100%{opacity:1} 95%{opacity:0.3} }
+  #clock { color:var(--accent3); font-size:12px; font-weight:700; }
+  .source-badge { font-size:9px; color:var(--success); border:1px solid rgba(0,255,136,0.3); padding:2px 6px; background:rgba(0,255,136,0.07); }
+
+  /* STATS */
+  .stats-row { display:grid; grid-template-columns:repeat(4,1fr); gap:1px; border-bottom:1px solid var(--border); background:var(--border); }
+  .stat-card { background:var(--surface); padding:18px 24px; position:relative; overflow:hidden; }
+  .stat-card::after { content:''; position:absolute; bottom:0;left:0; height:2px; width:0%; background:var(--accent); transition:width 0.6s ease; }
+  .stat-card.updated::after { width:100%; }
+  .stat-label { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:0.12em; margin-bottom:8px; }
+  .stat-value { font-family:var(--font-display); font-size:32px; font-weight:800; color:#fff; transition:color 0.3s; }
+  .stat-value.flash { color:var(--accent); }
+  .stat-delta { font-size:11px; margin-top:4px; color:var(--muted); }
+  .stat-delta.up { color:var(--accent); }
+  .stat-delta.down { color:var(--success); }
+  .stat-source { font-size:8px; color:var(--accent3); margin-top:2px; letter-spacing:0.05em; }
+
+  /* SEARCH */
+  .search-bar {
+    display:flex; align-items:center; gap:8px; padding:8px 20px;
+    border-bottom:1px solid var(--border); background:var(--surface);
+  }
+  .search-bar input {
+    flex:1; background:var(--panel); border:1px solid var(--border); color:var(--text);
+    padding:8px 12px; font-family:var(--font-mono); font-size:11px; outline:none;
+  }
+  .search-bar input:focus { border-color:var(--accent3); }
+  .search-bar button {
+    background:var(--accent); color:#fff; border:none; padding:8px 16px;
+    font-family:var(--font-mono); font-size:10px; font-weight:700; cursor:pointer;
+    text-transform:uppercase; letter-spacing:0.1em;
+  }
+  .search-bar button:hover { background:#ff5555; }
+
+  /* MAIN GRID */
+  .main-grid { display:grid; grid-template-columns:1fr 360px; height:calc(100vh - 120px); }
+  .map-section { position:relative; border-right:1px solid var(--border); }
+  .map-header { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; border-bottom:1px solid var(--border); font-size:11px; background:var(--surface); }
+  .map-title { font-family:var(--font-display); font-weight:700; font-size:13px; color:#fff; text-transform:uppercase; letter-spacing:0.08em; }
+  .map-controls { display:flex; gap:12px; align-items:center; }
+  .legend-item { display:flex; align-items:center; gap:5px; font-size:10px; color:var(--muted); }
+  .legend-dot { width:8px; height:8px; border-radius:50%; }
+  .map-lock-indicator { font-size:10px; padding:2px 8px; border:1px solid; letter-spacing:0.08em; font-weight:700; transition:all 0.3s; }
+  .map-lock-indicator.free { color:var(--success); border-color:rgba(0,255,136,0.3); background:rgba(0,255,136,0.07); }
+  .map-lock-indicator.locked { color:var(--accent2); border-color:rgba(255,140,0,0.3); background:rgba(255,140,0,0.07); }
+  #map { height:calc(100% - 41px); background:var(--bg); }
+  .leaflet-container { background:#0a0f18!important; font-family:var(--font-mono)!important; }
+  .leaflet-tile-pane { filter:saturate(0.3) brightness(0.5) hue-rotate(200deg); }
+  @keyframes ping { 0%{box-shadow:0 0 0 0 currentColor;opacity:1} 70%{box-shadow:0 0 0 12px transparent} 100%{box-shadow:0 0 0 0 transparent;opacity:1} }
+
+  /* SIDEBAR */
+  .sidebar { display:flex; flex-direction:column; background:var(--surface); overflow:hidden; }
+  .sidebar-header { padding:12px 20px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+  .sidebar-title { font-family:var(--font-display); font-weight:700; font-size:13px; color:#fff; text-transform:uppercase; letter-spacing:0.08em; }
+  .update-timer { font-size:10px; color:var(--accent3); }
+  .feed-list { flex:1; overflow-y:auto; padding:8px 0; }
+  .feed-list::-webkit-scrollbar { width:3px; }
+  .feed-list::-webkit-scrollbar-thumb { background:var(--border); }
+  .feed-item { padding:12px 20px; border-bottom:1px solid rgba(30,45,61,0.5); cursor:default; transition:background 0.2s; animation:slideIn 0.4s ease forwards; opacity:0; transform:translateX(20px); }
+  @keyframes slideIn { to{opacity:1;transform:translateX(0)} }
+  .feed-item:hover { background:rgba(255,60,60,0.04); }
+  .feed-item-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:5px; }
+  .feed-severity { font-size:9px; font-weight:700; padding:2px 6px; text-transform:uppercase; letter-spacing:0.1em; }
+  .sev-critical { background:rgba(255,60,60,0.15); color:var(--accent); border:1px solid rgba(255,60,60,0.3); }
+  .sev-high { background:rgba(255,140,0,0.15); color:var(--accent2); border:1px solid rgba(255,140,0,0.3); }
+  .sev-medium { background:rgba(0,229,255,0.1); color:var(--accent3); border:1px solid rgba(0,229,255,0.2); }
+  .feed-time { font-size:10px; color:var(--muted); }
+  .feed-title { font-family:var(--font-display); font-size:12px; font-weight:700; color:#e0e0e0; margin-bottom:3px; line-height:1.3; }
+  .feed-desc { font-size:10px; color:var(--muted); line-height:1.5; }
+  .feed-location { display:flex; align-items:center; gap:4px; margin-top:5px; font-size:10px; color:var(--accent3); }
+  .feed-source { font-size:8px; color:var(--muted); margin-top:3px; font-style:italic; }
+
+  /* STATES TABLE */
+  .states-table { border-top:1px solid var(--border); padding:12px 20px; }
+  .states-title { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:10px; }
+  .state-row { display:flex; align-items:center; justify-content:space-between; padding:4px 0; border-bottom:1px solid rgba(30,45,61,0.4); }
+  .state-name { font-size:11px; color:var(--text); }
+  .state-bar-wrap { flex:1; margin:0 10px; height:3px; background:var(--border); border-radius:2px; overflow:hidden; }
+  .state-bar { height:100%; border-radius:2px; transition:width 0.8s ease; }
+  .state-count { font-size:11px; font-weight:700; }
+
+  /* TOAST */
+  .toast-container { position:fixed; top:70px; right:20px; z-index:1000; display:flex; flex-direction:column; gap:8px; }
+  .toast { background:var(--panel); border:1px solid var(--accent); border-left:3px solid var(--accent); padding:10px 14px; max-width:280px; animation:toastIn 0.3s ease,toastOut 0.3s ease 3.7s forwards; box-shadow:0 4px 20px rgba(255,60,60,0.2); }
+  @keyframes toastIn { from{opacity:0;transform:translateX(20px)} to{opacity:1;transform:translateX(0)} }
+  @keyframes toastOut { from{opacity:1;transform:translateX(0)} to{opacity:0;transform:translateX(20px)} }
+  .toast-title { font-family:var(--font-display); font-size:11px; font-weight:700; color:var(--accent); text-transform:uppercase; letter-spacing:0.08em; }
+  .toast-body { font-size:10px; color:var(--muted); margin-top:3px; }
+  .grid-bg { position:absolute; inset:0; background-image:linear-gradient(rgba(0,229,255,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,255,0.03) 1px,transparent 1px); background-size:40px 40px; pointer-events:none; z-index:1; }
+
+  /* LOADING */
+  .loading-overlay {
+    position:absolute; inset:0; background:rgba(8,12,16,0.9); display:flex;
+    align-items:center; justify-content:center; z-index:200; flex-direction:column; gap:12px;
+  }
+  .loading-spinner { width:30px; height:30px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin 0.8s linear infinite; }
+  @keyframes spin { to{transform:rotate(360deg)} }
+  .loading-text { font-size:11px; color:var(--muted); letter-spacing:0.05em; }
+
+  /* POPUP */
+  .leaflet-popup-content-wrapper { background:var(--panel)!important; border:1px solid var(--border)!important; border-radius:0!important; box-shadow:0 4px 20px rgba(0,0,0,0.5)!important; color:var(--text)!important; font-family:var(--font-mono)!important; font-size:11px!important; }
+  .leaflet-popup-tip { background:var(--panel)!important; }
+  .popup-title { font-family:var(--font-display); font-weight:700; font-size:13px; color:#fff; margin-bottom:4px; }
+  .popup-line { font-size:10px; color:var(--muted); margin-bottom:2px; }
+  .popup-sev { display:inline-block; margin-top:6px; font-size:9px; font-weight:700; padding:2px 6px; }
+  .popup-source { font-size:8px; color:var(--accent3); margin-top:4px; font-style:italic; }
+
+  /* MARKER CLUSTER - dark theme */
+  .marker-cluster-small {
+    background: rgba(0,229,255,0.25) !important;
+  }
+  .marker-cluster-small div {
+    background: rgba(0,229,255,0.6) !important;
+    color: #fff !important;
+    font-family: var(--font-mono) !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+  }
+  .marker-cluster-medium {
+    background: rgba(255,140,0,0.25) !important;
+  }
+  .marker-cluster-medium div {
+    background: rgba(255,140,0,0.6) !important;
+    color: #fff !important;
+    font-family: var(--font-mono) !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+  }
+  .marker-cluster-large {
+    background: rgba(255,60,60,0.25) !important;
+  }
+  .marker-cluster-large div {
+    background: rgba(255,60,60,0.6) !important;
+    color: #fff !important;
+    font-family: var(--font-mono) !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+  }
+  .marker-cluster div {
+    width: 36px !important;
+    height: 36px !important;
+    margin-left: 5px !important;
+    margin-top: 5px !important;
+    border-radius: 50% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  /* FILTERS */
+  .filter-bar {
+    display:flex; gap:6px; padding:6px 20px; border-bottom:1px solid var(--border);
+    background:var(--surface); flex-wrap:wrap;
+  }
+  .filter-btn {
+    font-family:var(--font-mono); font-size:9px; padding:4px 10px; border:1px solid var(--border);
+    background:transparent; color:var(--muted); cursor:pointer; text-transform:uppercase;
+    letter-spacing:0.08em; transition:all 0.2s;
+  }
+  .filter-btn:hover, .filter-btn.active {
+    border-color:var(--accent3); color:var(--accent3); background:rgba(0,229,255,0.07);
+  }
+
+  /* RESPONSIVE */
+  @media (max-width: 900px) {
+    .main-grid { grid-template-columns:1fr; }
+    .sidebar { display:none; }
+    .stats-row { grid-template-columns:repeat(2,1fr); }
+    header { flex-direction:column; gap:8px; }
+  }
+
+  /* AI SEARCH PANEL */
+  .ai-panel {
+    border-top:1px solid var(--border); background:var(--surface);
+    padding:12px 20px; max-height:300px; overflow-y:auto; display:none;
+  }
+  .ai-panel.active { display:block; }
+  .ai-panel-header {
+    display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;
+  }
+  .ai-panel-title {
+    font-family:var(--font-display); font-size:12px; font-weight:700;
+    color:var(--accent3); text-transform:uppercase; letter-spacing:0.08em;
+  }
+  .ai-badge {
+    font-size:8px; padding:2px 6px; border:1px solid;
+    letter-spacing:0.05em; font-weight:700;
+  }
+  .ai-badge.active { color:var(--success); border-color:rgba(0,255,136,0.3); background:rgba(0,255,136,0.07); }
+  .ai-badge.inactive { color:var(--accent2); border-color:rgba(255,140,0,0.3); background:rgba(255,140,0,0.07); }
+  .ai-response {
+    font-size:11px; color:var(--text); line-height:1.6;
+    white-space:pre-wrap; word-wrap:break-word;
+  }
+  .ai-response .ai-thinking {
+    color:var(--muted); font-style:italic;
+  }
+  .ai-sources {
+    margin-top:8px; padding-top:8px; border-top:1px solid var(--border);
+    font-size:9px; color:var(--muted);
+  }
+  .ai-sources a { color:var(--accent3); text-decoration:none; }
+  .ai-sources a:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <div class="logo-dot"></div>
+    <div class="logo-text">MONITOR<span>BR</span></div>
+    <span class="live-badge">AO VIVO</span>
+    <span class="source-badge" id="source-badge">CONECTANDO...</span>
+  </div>
+  <div class="header-status">
+    <span>SISTEMA DE MONITORAMENTO DE PRODUTOS IRREGULARES</span>
+    <div id="clock">--:--:--</div>
+  </div>
+</header>
+
+<div class="stats-row">
+  <div class="stat-card" id="stat-total">
+    <div class="stat-label">Total de Alertas</div>
+    <div class="stat-value" id="val-total">--</div>
+    <div class="stat-delta up" id="delta-total">carregando...</div>
+    <div class="stat-source" id="src-total"></div>
+  </div>
+  <div class="stat-card" id="stat-criticos">
+    <div class="stat-label">Casos Críticos</div>
+    <div class="stat-value" id="val-criticos">--</div>
+    <div class="stat-delta up" id="delta-criticos">carregando...</div>
+    <div class="stat-source" id="src-criticos"></div>
+  </div>
+  <div class="stat-card" id="stat-estados">
+    <div class="stat-label">Estados Afetados</div>
+    <div class="stat-value" id="val-estados">--</div>
+    <div class="stat-delta" id="delta-estados">regiões monitoradas</div>
+    <div class="stat-source" id="src-estados"></div>
+  </div>
+  <div class="stat-card" id="stat-valor">
+    <div class="stat-label">Valor Estimado Apreendido</div>
+    <div class="stat-value" id="val-valor">R$ --</div>
+    <div class="stat-delta down" id="delta-valor">atualizado agora</div>
+    <div class="stat-source" id="src-valor"></div>
+  </div>
+</div>
+
+<div class="search-bar">
+  <input type="text" id="search-input" placeholder="Buscar empresa, produto ou estado...">
+  <button onclick="doSearch()">BUSCAR</button>
+  <button onclick="doAISearch()" style="background:var(--accent3)" id="ai-btn">🤖 PESQUISAR COM IA</button>
+  <button onclick="refreshData()" style="background:var(--accent2)">ATUALIZAR</button>
+</div>
+
+<!-- AI RESPONSE PANEL -->
+<div class="ai-panel" id="ai-panel">
+  <div class="ai-panel-header">
+    <div class="ai-panel-title">🤖 Pesquisa Inteligente</div>
+    <div class="ai-badge" id="ai-badge">CARREGANDO...</div>
+  </div>
+  <div class="ai-response" id="ai-response"></div>
+  <div class="ai-sources" id="ai-sources"></div>
+</div>
+
+<div class="filter-bar">
+  <button class="filter-btn active" onclick="setFilter('all',this)">TODOS</button>
+  <button class="filter-btn" onclick="setFilter('critical',this)">CRÍTICO</button>
+  <button class="filter-btn" onclick="setFilter('high',this)">ALTO</button>
+  <button class="filter-btn" onclick="setFilter('medium',this)">MÉDIO</button>
+  <button class="filter-btn" onclick="setFilter('CEIS',this)">CEIS</button>
+  <button class="filter-btn" onclick="setFilter('CNEP',this)">CNEP</button>
+</div>
+
+<div class="main-grid">
+  <div class="map-section">
+    <div class="loading-overlay" id="loading">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">Conectando às fontes de dados...</div>
+    </div>
+    <div class="grid-bg"></div>
+    <div class="map-header">
+      <div class="map-title">Mapa de Incidentes - Brasil</div>
+      <div class="map-controls">
+        <div class="legend-item"><div class="legend-dot" style="background:#ff3c3c;box-shadow:0 0 6px #ff3c3c"></div> Crítico</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ff8c00;box-shadow:0 0 6px #ff8c00"></div> Alto</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#00e5ff;box-shadow:0 0 6px #00e5ff"></div> Médio</div>
+        <div class="map-lock-indicator free" id="map-lock-indicator">AUTO</div>
+      </div>
+    </div>
+    <div id="map"></div>
+  </div>
+
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-title">Feed de Alertas</div>
+      <div class="update-timer" id="update-timer">Atualizando em --s</div>
+    </div>
+    <div class="feed-list" id="feed-list"></div>
+    <div class="states-table">
+      <div class="states-title">Top Estados por Ocorrências</div>
+      <div id="states-list"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<script>
+// ===================== CONFIG =====================
+const API_BASE = window.location.origin + '/api';
+const REFRESH_INTERVAL = 30000; // 30s
+
+// ===================== STATE =====================
+let allIncidents = [];
+let activeIncidents = [];
+let totalValue = 0;
+let currentFilter = 'all';
+let timerCount = 30;
+
+// ===================== MAP =====================
+const map = L.map('map',{
+  zoomControl:false,
+  attributionControl:false,
+  preferCanvas:true,      // Canvas em vez de SVG (muito mais rápido)
+  zoomAnimation:false,    // Desabilitar animações de zoom
+  markerZoomAnimation:false,
+  fadeAnimation:false
+}).setView([-14.5,-52],4);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,opacity:0.4}).addTo(map);
+L.control.zoom({position:'bottomright'}).addTo(map);
+
+const severityConfig = {
+  critical:{color:'#ff3c3c',radius:14},
+  high:{color:'#ff8c00',radius:10},
+  medium:{color:'#00e5ff',radius:7}
+};
+
+// ===================== MAP INTERACTION CONTROL =====================
+let lastUserInteractionTime = 0;
+const USER_IDLE_THRESHOLD_MS = 30000;
+let isAutoMoving = false;
+
+function isUserIdle() {
+  if (lastUserInteractionTime === 0) return true;
+  return (Date.now() - lastUserInteractionTime) >= USER_IDLE_THRESHOLD_MS;
+}
+
+function updateLockIndicator() {
+  const el = document.getElementById('map-lock-indicator');
+  if (!el) return;
+  if (isUserIdle()) {
+    el.textContent = 'AUTO';
+    el.className = 'map-lock-indicator free';
+  } else {
+    const s = Math.ceil((USER_IDLE_THRESHOLD_MS - (Date.now() - lastUserInteractionTime)) / 1000);
+    el.textContent = 'MANUAL ' + s + 's';
+    el.className = 'map-lock-indicator locked';
+  }
+}
+
+function registerUserInteraction() {
+  if (isAutoMoving) return;
+  lastUserInteractionTime = Date.now();
+  updateLockIndicator();
+}
+
+map.on('mousedown', registerUserInteraction);
+map.on('touchstart', registerUserInteraction);
+map.on('dragstart', registerUserInteraction);
+map.on('zoomstart', registerUserInteraction);
+map.getContainer().addEventListener('wheel', registerUserInteraction, {passive:true});
+setInterval(updateLockIndicator, 1000);
+
+// ===================== MARKERS =====================
+const markers = L.markerClusterGroup({
+  maxClusterRadius: 50,
+  spiderfyOnMaxZoom: true,
+  showCoverageOnHover: false,
+  zoomToBoundsOnClick: true,
+  chunkedLoading: true,
+  iconCreateFunction: function(cluster) {
+    const count = cluster.getChildCount();
+    let size = 'small';
+    if (count > 50) size = 'large';
+    else if (count > 10) size = 'medium';
+    return L.divIcon({
+      html: '<div>' + count + '</div>',
+      className: 'marker-cluster marker-cluster-' + size,
+      iconSize: L.point(40, 40)
+    });
+  }
+});
+map.addLayer(markers);
+
+const MAX_MARKERS = 100; // Limitar markers no mapa para performance
+
+function clearMarkers() {
+  markers.clearLayers();
+}
+
+function createMarker(incident) {
+  const cfg = severityConfig[incident.severity] || severityConfig.medium;
+  const icon = L.divIcon({
+    className:'',
+    html:`<div style="width:${cfg.radius}px;height:${cfg.radius}px;border-radius:50%;background:${cfg.color}33;border:2px solid ${cfg.color};box-shadow:0 0 ${cfg.radius}px ${cfg.color};${incident.severity==='critical'?'animation:ping 1.5s cubic-bezier(0,0,0.2,1) infinite;':''}"></div>`,
+    iconSize:[cfg.radius,cfg.radius],
+    iconAnchor:[cfg.radius/2,cfg.radius/2]
+  });
+
+  const marker = L.marker([incident.lat,incident.lon],{icon});
+  const sevLabel = {critical:'CRÍTICO',high:'ALTO',medium:'MÉDIO'}[incident.severity]||'MÉDIO';
+  const sevStyle = {
+    critical:'background:rgba(255,60,60,0.2);color:#ff3c3c;border:1px solid rgba(255,60,60,0.4)',
+    high:'background:rgba(255,140,0,0.2);color:#ff8c00;border:1px solid rgba(255,140,0,0.4)',
+    medium:'background:rgba(0,229,255,0.1);color:#00e5ff;border:1px solid rgba(0,229,255,0.3)'
+  }[incident.severity]||'';
+
+  marker.bindPopup(`
+    <div class="popup-title">${incident.title}</div>
+    <div class="popup-line">${incident.city} - ${incident.state}</div>
+    <div class="popup-line">${incident.desc}</div>
+    <div class="popup-line">Categoria: ${incident.category||'-'}</div>
+    ${incident.value ? `<div class="popup-line">Valor: R$ ${incident.value.toLocaleString('pt-BR')}</div>` : ''}
+    <span class="popup-sev" style="${sevStyle}">${sevLabel}</span>
+    ${incident.source ? `<div class="popup-source">Fonte: ${incident.source}</div>` : ''}
+    ${incident.link ? `<div class="popup-source"><a href="${incident.link}" target="_blank" style="color:var(--accent3)">Ver matéria →</a></div>` : ''}
+  `);
+
+  marker.on('click', registerUserInteraction);
+  markers.addLayer(marker);
+}
+
+// ===================== FILTERS =====================
+function applyFilter() {
+  if (currentFilter === 'all') {
+    activeIncidents = [...allIncidents];
+  } else if (['critical','high','medium'].includes(currentFilter)) {
+    activeIncidents = allIncidents.filter(i => i.severity === currentFilter);
+  } else {
+    activeIncidents = allIncidents.filter(i => i.source && i.source.includes(currentFilter));
+  }
+
+  clearMarkers();
+
+  // Ordenar por severidade (critical > high > medium) e limitar markers
+  const severityOrder = { critical: 0, high: 1, medium: 2 };
+  const sorted = [...activeIncidents].sort((a, b) =>
+    (severityOrder[a.severity] ?? 3) - (severityOrder[b.severity] ?? 3)
+  );
+  const toShow = sorted.slice(0, MAX_MARKERS);
+  toShow.forEach(createMarker);
+
+  // Atualizar contador no badge
+  const badge = document.getElementById('source-badge');
+  if (activeIncidents.length > MAX_MARKERS) {
+    badge.textContent = `MOSTRANDO ${MAX_MARKERS} DE ${activeIncidents.length}`;
+    badge.style.color = 'var(--accent2)';
+  }
+
+  renderFeed();
+  updateStats();
+  updateStatesTable();
+}
+
+function setFilter(filter, btn) {
+  currentFilter = filter;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  applyFilter();
+}
+
+// ===================== FEED =====================
+function formatTime() {
+  return new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+}
+
+function renderFeed() {
+  const list = document.getElementById('feed-list');
+  list.innerHTML = '';
+  activeIncidents.slice(0, 30).forEach(incident => {
+    const sevClass = {critical:'sev-critical',high:'sev-high',medium:'sev-medium'}[incident.severity]||'sev-medium';
+    const sevLabel = {critical:'CRÍTICO',high:'ALTO',medium:'MÉDIO'}[incident.severity]||'MÉDIO';
+    const item = document.createElement('div');
+    item.className = 'feed-item';
+    item.innerHTML = `
+      <div class="feed-item-top">
+        <span class="feed-severity ${sevClass}">${sevLabel}</span>
+        <span class="feed-time">${incident.date || formatTime()}</span>
+      </div>
+      <div class="feed-title">${incident.title}</div>
+      <div class="feed-desc">${incident.desc}</div>
+      <div class="feed-location">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10">
+          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+          <circle cx="12" cy="9" r="2.5"/>
+        </svg>
+        ${incident.city} - ${incident.state}
+      </div>
+      ${incident.source ? `<div class="feed-source">Fonte: ${incident.source}</div>` : ''}
+      ${incident.link ? `<div class="feed-source"><a href="${incident.link}" target="_blank" style="color:var(--accent3);text-decoration:none">Ver matéria →</a></div>` : ''}
+    `;
+    list.appendChild(item);
+  });
+}
+
+// ===================== STATS =====================
+function flashStat(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.add('updated');
+  setTimeout(() => el.classList.remove('updated'), 700);
+  const val = el.querySelector('.stat-value');
+  if (val) { val.classList.add('flash'); setTimeout(() => val.classList.remove('flash'), 600); }
+}
+
+function updateStats() {
+  const total = activeIncidents.length;
+  const criticos = activeIncidents.filter(i => i.severity === 'critical').length;
+  const estados = new Set(activeIncidents.map(i => i.state)).size;
+  const valor = activeIncidents.reduce((s, i) => s + (i.value || 0), 0);
+
+  document.getElementById('val-total').textContent = total;
+  document.getElementById('val-criticos').textContent = criticos;
+  document.getElementById('val-estados').textContent = estados;
+  document.getElementById('val-valor').textContent = 'R$ ' + valor.toLocaleString('pt-BR');
+
+  document.getElementById('delta-total').textContent = `atualizado ${formatTime()}`;
+  document.getElementById('delta-criticos').textContent = criticos > 0 ? `${criticos} em destaque` : 'nenhum crítico';
+
+  ['stat-total','stat-criticos','stat-estados','stat-valor'].forEach(flashStat);
+}
+
+// ===================== STATES TABLE =====================
+function updateStatesTable() {
+  const counts = {};
+  activeIncidents.forEach(i => { counts[i.state] = (counts[i.state]||0) + 1; });
+  const sorted = Object.entries(counts).sort((a,b) => b[1]-a[1]).slice(0,6);
+  const max = sorted[0]?.[1] || 1;
+  const colors = ['#ff3c3c','#ff8c00','#00e5ff','#00ff88','#a855f7','#f59e0b'];
+  const list = document.getElementById('states-list');
+  list.innerHTML = '';
+  sorted.forEach(([state,count],i) => {
+    const pct = Math.round((count/max)*100);
+    const row = document.createElement('div');
+    row.className = 'state-row';
+    row.innerHTML = `
+      <span class="state-name">${state}</span>
+      <div class="state-bar-wrap"><div class="state-bar" style="width:${pct}%;background:${colors[i]||'#fff'}"></div></div>
+      <span class="state-count" style="color:${colors[i]||'#fff'}">${count}</span>
+    `;
+    list.appendChild(row);
+  });
+}
+
+// ===================== TOAST =====================
+function showToast(incident) {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.innerHTML = `
+    <div class="toast-title">Novo Alerta Detectado</div>
+    <div class="toast-body">${incident.title} - ${incident.city}</div>
+  `;
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 4200);
+}
+
+// ===================== DATA FETCHING =====================
+async function fetchIncidents() {
+  try {
+    const resp = await fetch(`${API_BASE}/incidents`);
+    const data = await resp.json();
+
+    const badge = document.getElementById('source-badge');
+    if (data.isLive) {
+      badge.textContent = `NOTÍCIAS REAIS — ${data.total || 0} itens`;
+      badge.style.color = 'var(--success)';
+    } else if (data.fallback) {
+      badge.textContent = 'DEMONSTRAÇÃO';
+      badge.style.color = 'var(--accent2)';
+    } else {
+      badge.textContent = data.source || 'CONECTADO';
+      badge.style.color = 'var(--success)';
+    }
+
+    return data.incidents || [];
+  } catch (err) {
+    console.error('Erro ao buscar incidentes:', err);
+    document.getElementById('source-badge').textContent = 'OFFLINE';
+    document.getElementById('source-badge').style.color = 'var(--accent)';
+    return [];
+  }
+}
+
+async function fetchStats() {
+  try {
+    const resp = await fetch(`${API_BASE}/stats`);
+    return await resp.json();
+  } catch { return null; }
+}
+
+async function doSearch() {
+  const q = document.getElementById('search-input').value.trim();
+  if (!q) { applyFilter(); return; }
+
+  try {
+    const resp = await fetch(`${API_BASE}/search?q=${encodeURIComponent(q)}`);
+    const results = await resp.json();
+
+    if (results.length > 0) {
+      showToast({ title: `${results.length} resultados para "${q}"`, city: '' });
+      // Filter current incidents by search term
+      const qLower = q.toLowerCase();
+      activeIncidents = allIncidents.filter(i =>
+        i.title.toLowerCase().includes(qLower) ||
+        i.desc.toLowerCase().includes(qLower) ||
+        i.city.toLowerCase().includes(qLower) ||
+        i.state.toLowerCase().includes(qLower)
+      );
+      clearMarkers();
+      activeIncidents.forEach(createMarker);
+      renderFeed();
+      updateStats();
+      updateStatesTable();
+    } else {
+      showToast({ title: `Nenhum resultado para "${q}"`, city: '' });
+    }
+  } catch (err) {
+    console.error('Erro na busca:', err);
+  }
+}
+
+// Enter key triggers search
+document.getElementById('search-input').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') doSearch();
+});
+
+// ===================== AI SEARCH =====================
+async function checkAIStatus() {
+  try {
+    const resp = await fetch(`${API_BASE}/ai-status`);
+    const status = await resp.json();
+    const badge = document.getElementById('ai-badge');
+    if (status.aiEnabled) {
+      badge.textContent = `ATIVO — ${status.model}`;
+      badge.className = 'ai-badge active';
+    } else {
+      badge.textContent = 'MODO DADOS (sem IA)';
+      badge.className = 'ai-badge inactive';
+    }
+  } catch {
+    const badge = document.getElementById('ai-badge');
+    badge.textContent = 'OFFLINE';
+    badge.className = 'ai-badge inactive';
+  }
+}
+
+async function doAISearch() {
+  const q = document.getElementById('search-input').value.trim();
+  if (!q) { showToast({ title: 'Digite algo para pesquisar', city: '' }); return; }
+
+  const panel = document.getElementById('ai-panel');
+  const responseEl = document.getElementById('ai-response');
+  const sourcesEl = document.getElementById('ai-sources');
+
+  panel.classList.add('active');
+  responseEl.innerHTML = '<span class="ai-thinking">🔍 Buscando dados reais em APIs governamentais e na web...</span>';
+  sourcesEl.innerHTML = '';
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+    const resp = await fetch(`${API_BASE}/ai-search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: q }),
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+
+    const data = await resp.json();
+
+    if (data.error) {
+      responseEl.innerHTML = `<span style="color:var(--accent)">Erro: ${data.error}</span>`;
+      return;
+    }
+
+    // Renderizar resposta
+    responseEl.textContent = data.answer;
+
+    // Renderizar fontes
+    if (data.sources && data.sources.length > 0) {
+      const uniqueSources = [...new Map(data.sources.map(s => [s.name, s])).values()];
+      sourcesEl.innerHTML = '<strong>Fontes:</strong> ' +
+        uniqueSources.map(s =>
+          s.url ? `<a href="${s.url}" target="_blank">${s.name}</a>` : s.name
+        ).join(' · ');
+    }
+
+    // Badge de status
+    const badge = document.getElementById('ai-badge');
+    if (data.aiPowered) {
+      badge.textContent = `IA: ${data.model}`;
+      badge.className = 'ai-badge active';
+    } else {
+      badge.textContent = 'MODO DADOS (sem IA)';
+      badge.className = 'ai-badge inactive';
+    }
+
+    showToast({ title: 'Pesquisa concluída', city: `${data.sources?.length || 0} fontes` });
+
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      responseEl.innerHTML = `<span style="color:var(--accent)">⏱ Tempo esgotado (30s). Tente uma pesquisa mais curta.</span>`;
+    } else {
+      responseEl.innerHTML = `<span style="color:var(--accent)">Erro de conexão: ${err.message}</span>`;
+    }
+  }
+}
+
+async function refreshData() {
+  document.getElementById('loading').style.display = 'flex';
+
+  const [incidents] = await Promise.all([fetchIncidents()]);
+
+  allIncidents = incidents;
+  totalValue = allIncidents.reduce((s, i) => s + (i.value || 0), 0);
+
+  applyFilter();
+
+  document.getElementById('loading').style.display = 'none';
+  showToast({ title: 'Dados atualizados', city: `${allIncidents.length} registros` });
+}
+
+// ===================== CLOCK =====================
+function updateClock() {
+  const now = new Date();
+  const h = String(now.getHours()).padStart(2,'0');
+  const m = String(now.getMinutes()).padStart(2,'0');
+  const s = String(now.getSeconds()).padStart(2,'0');
+  document.getElementById('clock').textContent = h+':'+m+':'+s;
+}
+
+// ===================== TIMER =====================
+function updateTimerDisplay() {
+  timerCount--;
+  if (timerCount <= 0) timerCount = 30;
+  document.getElementById('update-timer').textContent = `Atualizando em ${timerCount}s`;
+}
+
+// ===================== INIT =====================
+async function init() {
+  updateClock();
+  setInterval(updateClock, 1000);
+  setInterval(updateTimerDisplay, 1000);
+
+  await refreshData();
+  await checkAIStatus();
+
+  // Auto-refresh
+  setInterval(async () => {
+    timerCount = 30;
+    await refreshData();
+  }, REFRESH_INTERVAL);
+}
+
+init();
+</script>
+</body>
+</html>

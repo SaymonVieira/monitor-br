@@ -1,0 +1,19 @@
+{
+  "name": "monitor-br",
+  "version": "1.0.0",
+  "description": "Monitor BR - Produtos Irregulares em Tempo Real com IA",
+  "main": "backend/server.js",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "node backend/server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.0",
+    "cors": "^2.8.5",
+    "axios": "^1.6.0",
+    "node-cache": "^5.1.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
